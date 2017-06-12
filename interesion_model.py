@@ -29,6 +29,8 @@ class exciting(object):
 		self._fpsEstimate = None
 		self._startTime = None
 		self._videoEncoding = None
+		
+
 
 	def inside(self,r1,r2):
 		x1,y1,w1,h1 = r1
@@ -82,7 +84,6 @@ class exciting(object):
 	def read_images_array(self,path='face/face_gray/',l=20,z=0):
 	#读取图片（路径，张数，人数，图片太大了）
 	#face/str(1)/str(i)+'png'
-
 		c=0
 		x,y=[],[]
 		for o in range(0,z+1):
@@ -100,6 +101,9 @@ class exciting(object):
 					continue
 			c=c+1
 		return [x,y]
+	@property
+	def isFirstFace(self):
+		return self._firstFace is not True
 
 	def face_rec(self,array):
 		try:
@@ -107,6 +111,7 @@ class exciting(object):
 			y=np.asarray(y,dtype=np.int32)
 			self.model = cv2.face.createEigenFaceRecognizer()
 			self.model.train(np.asarray(x),np.asarray(y))
+			
 		except:
 			return False
 
@@ -114,6 +119,7 @@ class exciting(object):
 		try:
 			roi = cv2.resize(roi,(32,32),interpolation = cv2.INTER_LINEAR)
 			return self.model.predict(roi)
+			
 		except:
 			return
 

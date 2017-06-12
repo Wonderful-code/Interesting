@@ -8,7 +8,6 @@ import datetime
 import random
 import numpy as np
 from interesion_model import exciting
-from imutils.object_detection import non_max_suppression
 from pygame.locals import *
 from sys import exit
 
@@ -37,6 +36,7 @@ width = args["width"]
 height = args["height"]
 frames = 0 #帧计数器
 history = 20 #背景建模样本量
+faceslen=0
 #firstFrame = None
 backgrouds = []
 pedestrians = {} #行人字典
@@ -46,18 +46,18 @@ pygame.display.set_caption('Interesing')
 screen = pygame.display.set_mode((width+200,height-399),pygame.RESIZABLE)
 screen.fill([0,0,0])#用黑色填充窗口
 et=exciting(camera,history)
-#et.read_images_array()
+facearray=et.read_images_array()
 
 backgrouds = et.readBackgroud(random.randint(0,19))
-if backgrouds != []:
+print(backgrouds)
+if backgrouds != None:
 	frames = 20
 
 faces = [['陈思羽','18']]
 faceShow = []
 
+faceID = 0
 f=0
-a=0
-sp=0
 #img= cv2.imread('face/face_gray/',cv2.IMREAD_GRAYSCALE)
 while camera.isOpened():
 
@@ -78,31 +78,26 @@ while camera.isOpened():
 
 	for event in pygame.event.get():
 		if event.type == pygame.MOUSEBUTTONDOWN:
-			if event.button == 4:
-				#上滑
-				sp = sp+1000
-				print('上')
-			else:
-				#下滑
-				sp = sp-1000
-				print("下")
+			pass
 		if event.type == pygame.QUIT:
 			camera.release()
 			pygame.quit()
 			exit()
 
 	for i in range(0,len(faceShow)):
-		et.show_text(screen,(width-50,10),str(f),(251,116,135),30)
+		
 		roj = cv2.cvtColor(faceShow[i], cv2.COLOR_RGB2BGR)
 		roj = np.swapaxes(roj, 0, 1)
 		roj = pygame.pixelcopy.make_surface(roj)
-		et.show_text(screen,(width,i*200+sp),str(i),(251,65,90),40)
-		screen.blit(roj, (width, i*200+sp))
+		et.show_text(screen,(width-100,10),str(f),(251,116,135),30)
+		et.show_text(screen,(width,i*200),str(i),(251,65,90),40)
+
+		screen.blit(roj, (width, i*200))
 
 
 	if frames < history:
 		et.show_text(screen, (100,200),u"请离开镜头",(255, 255, 255), True,120)
-		et.show_text(screen, (110,320),u"背      景      建      模      中:  {}%".format(frames),
+		et.show_text(screen, (110,320),u"背      景      建      模      中:  {}%".format((frames/history)*100),
 			(255, 255, 255), True,40)
 
 		KNN=et.KNN_difference(frame,args["min_area"])
@@ -147,11 +142,24 @@ while camera.isOpened():
 				roi = cv2.resize(roi,(200,200))
 				roj = cv2.resize(roj,(200,200))
 
+				faceShow.append(roj)
+				if facearray != []:
+
+					x.append(np.asarray(roi,dtype=np.uint8))
+					y.append(faceslen)
+					et.face_rec([x,y])
+					cv2.imwrite('face/face_gray/1/%s.png' % str(faceID),roi)
+					cv2.imwrite('face/face_color/1/%s.png' % str(faceID),roj)
+					faceslen = faceslen+1
+
+
+				et.face2(roj)
+
 				if f<20:
 					cv2.imwrite('face/face_gray/1/%s.png' % str(f),roi)
 					cv2.imwrite('face/face_color/1/%s.png' % str(f),roj)
 
-					faceShow.append(roj)
+					
 					f =f+1
 					
 					
