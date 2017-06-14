@@ -1,4 +1,5 @@
 #interesion_model.py
+import os
 import cv2
 import dlib
 import time
@@ -10,36 +11,69 @@ from imutils.object_detection import non_max_suppression
 
 class exciting(object):
 	"""docstring for """
-	def __init__(self,camera,history):
-
+	def __init__(self,camera,#摄像头对象
+					name='Interesing',
+					width =1000,
+					height=800,
+					history=20,#背景建模样本量
+					args=500,#忽略大小
+					):
+		self.height=height
+		self.width = width
+		self.name = name
+		self.camera = camera
+		self.history = history
+		self.args = args
 		#初始化方向梯度直方图描述子/设置支持向量机
 		self.hog = cv2.HOGDescriptor()
 		self.hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
 		#初始化背景分割器
 		self.bg = cv2.createBackgroundSubtractorKNN(detectShadows=True)
-		self.bg.setHistory(history)
-		self.detector = dlib.get_frontal_face_detector()
-		self.face_cascade = cv2.CascadeClassifier('haarcascades//haarcascade_frontalface_default.xml')
+		self.bg.setHistory(self.history)
 
+		self.detector = dlib.get_frontal_face_detector()
+		self.time = datetime.datetime.now().strftime(u"%Y-%d %I:%M:%S")
+		'''
+		面人脸分类器进行了实验，总共有4个，alt、alt2、alt_tree、default。
+		对比下来发现alt和alt2的效果比较好，alt_tree耗时较长，default是一个轻量级的，
+		经常出现误检测。所以还是推荐大家使用haarcascade_frontalface_atl.xml和
+		haarcascade_frontalface_atl2.xml。
+		'''
+		#self.face_cascade = cv2.CascadeClassifier('haarcascades//haarcascade_frontalface_default.xml')
+		#self.face_alt = cv2.CascadeClassifier('haarcascades//haarcascade_frontalface_alt.xml')
+		self.face_alt2 = cv2.CascadeClassifier('haarcascades//haarcascade_frontalface_alt2.xml')
+		
+		self.color = None
+		self.screen = None
+		self.frames = 0 #帧计数器
+		self._frame = None
 		self.model = None
-		self._camera = camera
+		self.gray = None
 		self._videoWriter = None
 		self._videoFilename = None
 		self._framesElapsed = None
 		self._fpsEstimate = None
 		self._startTime = None
 		self._videoEncoding = None
-		
 
+		self.path = ['Background','face/face_gray','face/face_color']
+		self.init
 
-	def inside(self,r1,r2):
-		x1,y1,w1,h1 = r1
-		x2,y2,w2,h2 = r2
-		if (x1>x2) and (y1>y2) and (x1+w1<x2+w2) and (y1+h1<y2+h2):
-			return True
+	@property
+	def init(self,width = None,height = None):
+		width = width and width or self.width
+		height= height and height or self.height
 
-		else:
-			return False 
+		pygame.init()
+		pygame.display.set_caption(self.name)
+		self.screen = pygame.display.set_mode((width,height-399),pygame.RESIZABLE)
+		self.screen.fill([0,0,0])#用黑色填充窗口
+
+		for path in self.path:
+			if os.path.exists(path):
+				print("OK")
+			else:
+				pass
 
 	def show_text(self,screen, pos, text, color, font_bold = False, font_size = 50, font_italic = False):   
 		'''
@@ -57,6 +91,15 @@ class exciting(object):
 		text_fmt = cur_font.render(text, 1, color)  
 		return screen.blit(text_fmt, pos)
 
+	def inside(self,r1,r2):
+		x1,y1,w1,h1 = r1
+		x2,y2,w2,h2 = r2
+		if (x1>x2) and (y1>y2) and (x1+w1<x2+w2) and (y1+h1<y2+h2):
+			return True
+
+		else:
+			return False 
+
 	def wrap_digit(self,rect):
 		x,y,w,h = rect
 		padding = 5
@@ -70,13 +113,17 @@ class exciting(object):
 			y = vcenter - (w/2)
 		return (x-padding,y-padding,w+padding,h+padding)
 
+	def backgrouds():
+		facearray=self.read_images_array()
 
+		backgrouds = self.readBackgroud(random.randint(0,19))
+		if backgrouds != None:
+			frames = 20
 	def readBackgroud(self,count):
 		return cv2.imread('Background//%s.png' % str(count),cv2.IMREAD_COLOR)
 
-	def writeBackgroud(self,frame,count):
-		#(帧，张)
-		return cv2.imwrite('Background/%s.png' % str(count),frame)
+	def writeBackgroud(self,count):#(帧，张)
+		return cv2.imwrite('Background//%s.png' % str(count),self._frame)
 
 	def writeImg(self,frame,path,count):
 		return cv2.imwrite(path+'/%s.png' % str(count),frame)
@@ -101,9 +148,7 @@ class exciting(object):
 					continue
 			c=c+1
 		return [x,y]
-	@property
-	def isFirstFace(self):
-		return self._firstFace is not True
+	
 
 	def face_rec(self,array):
 		try:
@@ -114,6 +159,10 @@ class exciting(object):
 			
 		except:
 			return False
+
+	def face(self,gray):
+		#脸
+		return self.face_alt2.detectMultiScale(gray, 1.3, 5)
 
 	def face2(self,roi):
 		try:
@@ -178,10 +227,6 @@ class exciting(object):
 		rects = np.array([[x, y, x + w, y + h] for (x, y, w, h) in rects])
 		return non_max_suppression(rects, probs=None, overlapThresh=0.65)
 
-	def face(self,gray):
-		#脸
-		return self.face_cascade.detectMultiScale(gray, 1.3, 5)
-
 	def dlibFace(self,frame):
 		l = None
 		dets = self.detector(frame, 0)
@@ -189,19 +234,52 @@ class exciting(object):
 			#pygame.draw.rect(screen,[163,0,22],[d.left(),d.top(),d.right(),d.bottom()],3)
 			l = d.left()
 		return l 
-	def car(self):
-		#汽车
-		pass
 
-	def Ev(self):
-		#电动车
-		pass
+	@property
+	def bgbuild(self):
+		if self.frames < self.history:
+			try:
+				self.show_text(self.screen, (100,200),u"请离开镜头",(255, 255, 255), True,120)
+				self.show_text(self.screen, (110,320),u"背      景      建      模      中:  {}%".format((self.frames/self.history)*100),
+				(255, 255, 255), True,40)
 
-	def bicycle(self):
-		#自行车
-		pass
+				KNN=self.KNN_difference(self._frame,self.args)
+				rect = self.people(self._frame) #人检查
+				dets = self.dlibFace(self.BGR)
+				face = self.face(self.gray) #脸
+		
+				if rect != [] or face != () or dets != None or KNN != []:
 
-	def Monitor(self,path,frame,encoding = cv2.VideoWriter_fourcc('I','4','2','0')):
+					for x,y,w,h in rect:
+						pygame.draw.rect(self.screen,[247,0,34],[x,y,w-x,h-y],3)
+					for fx,fy,fw,fh in face:
+						pygame.draw.rect(self.screen,[255,149,0],[fx,fy,fw,fh],3)
+					for r in KNN:
+						x,y,w,h = self.wrap_digit(r)
+						pygame.draw.rect(self.screen,[106,243,62],[x,y,w,h],3)
+
+			#for i,d in enumerate(dets):
+				#pygame.draw.rect(screen,[163,0,22],[d.left(),d.top(),d.right(),d.bottom()],3)
+			except:
+				KNN=self.KNN_difference(self._frame,self.args)
+				if KNN != []:
+					pass
+				else:
+					self.writeBackgroud(self.frames)
+					self.frames += 1
+		else:
+			self.writeBackgroud(self.frames)
+			self.frames += 1
+
+	@property
+	def isFirstFace(self):
+		return self._firstFace is not True
+	@property #在写视频吗？
+	def isWritingVideo(self):
+		return self._videoFilename is not None
+
+	@property
+	def FPS(self):
 		#更新FPS估计和相关变量。
 		if self._framesElapsed == 0:
 			self._startTime = time.time()
@@ -210,27 +288,89 @@ class exciting(object):
 			self._fpsEstimate = self._framesElapsed/timeElapsed
 		self._framesElapsed += 1
 
-		self._videoFilename = path
-		self._videoEncoding = encoding
-
-		self._writeVideoFrame()
-
 	def _writeVideoFrame(self):
 			
 		if not self.isWritingVideo:
 			return
 		if self._videoWriter is None:
-			fps = self._camera.get(cv2.CAP_PROP_FPS)
+			fps = self.camera.get(cv2.CAP_PROP_FPS)
 			if fps == 0.0:
 				if self._framesElapsed <20:
 					return
 				else:
 					fps = self._fpsEstimate
-			size = (int(self._camera.get(cv2.CAP_PROP_FRAME_WIDTH)),int(self._camera.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+			size = (int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH)),int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT)))
 
 			self._videoWriter = cv2.VideoWriter(self._videoFilename,self._videoEncoding,fps,size)
 		self._videoWriter.Write(self._frame)
 
-	@property #在写视频吗？
-	def isWritingVideo(self):
-		return self._videoFilename is not None
+	def Monitor(self,path,frame,encoding = cv2.VideoWriter_fourcc('I','4','2','0')):
+	
+		self._videoFilename = path
+		self._videoEncoding = encoding
+
+		self._writeVideoFrame()
+
+	@property
+	def start(self):
+		#self.FPS
+
+		(ret,cv_img)= self.camera.read()
+
+		self._frame = imutils.resize(cv_img,self.width,self.height)
+		#灰色
+		self.gray = cv2.cvtColor(self._frame, cv2.COLOR_BGR2GRAY)
+		#opencv的色彩空间是BGR，pygame的色彩空间是RGB
+		self.color = cv2.cvtColor(self._frame, cv2.COLOR_RGB2BGR)
+
+		self.show_text(self.screen,(10,self._frame.shape[0]-40),self.time,(0,131,195),True,30)
+		pygame.display.update()
+
+		pixl_arr = np.swapaxes(self.color, 0, 1)
+		new_surf = pygame.pixelcopy.make_surface(pixl_arr)
+		#设置窗口背景
+		self.screen.blit(new_surf, (0, 0))
+
+		self.bgbuild
+
+class Id(object):
+	"""docstring for faceId"""
+	def __init__(self,et):
+		self.ID = 0
+		self.et = et
+		self.grayfile = 'face/face_gray/'
+		self.colorfile='face/face_color/'
+		self.faceN = 0
+	@property
+	def id(self):
+		return self.ID
+	def faceN(self):
+		try:
+			for i in range(0,20):
+				cv2.imread(self.colorfile+'/%s.png' % str(i),cv2.IMREAD_COLOR)
+		except:
+			self.ID = self.faceN
+
+		self.faceN = self.faceN + 1
+
+	def face(self,color,gray):
+		if self.faceN <=20:
+			self.faceN = self.faceN+1
+			path_gray = self.grayfile + str(self.ID) +'/'+ str(self.faceN) + '.png'
+			path_color = self.colorfile + str(self.ID) +'/'+ str(self.faceN) + '.png'
+			cv2.imwrite(path_gray,gray)
+			cv2.imwrite(path_color,color)
+
+
+
+def car(self):
+	#汽车
+	pass
+
+def Ev(self):
+	#电动车
+	pass
+
+def bicycle(self):
+	#自行车
+	pass
