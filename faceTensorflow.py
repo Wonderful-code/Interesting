@@ -157,7 +157,7 @@ def is_my_face(image):
         return False  
    
 face_haar = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")  
-cam = cv2.VideoCapture(0)  
+cam = cv2.VideoCapture(0)
    
 while True:  
     _, img = cam.read()  
