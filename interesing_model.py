@@ -17,9 +17,6 @@
 Interesion 是一款监控,脸部识别
 interesion_model 是Interesion 的核心模块
 
-1.进行身份识别
-2.记录脸部图片 以200*200大小保存图片
-
 备忘录：　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　
 面人脸分类器进行了实验，总共有4个，alt、alt2、alt_tree、default。
 对比下来发现alt和alt2的效果比较好，alt_tree耗时较长，default是一个轻量级的，
@@ -33,58 +30,27 @@ import cv2
 import dlib
 import time
 import json
+import serial
+import random
 import pygame
 import imutils
 import datetime
-import numpy as np 
+import numpy as np
+from multiprocessing import Process
 from pygame_model import pygameDraw
 from imutils.object_detection import non_max_suppression
-
-class Id(object):
-
-	def __init__(self,Id):
-		self.face=[]
-		self._ID = Id
-		self._faceN = -1
-		self._grayfile = 'face/face_gray/'
-		self._colorfile='face/face_color/'
-		self.faceN()
-	def setId(self,Id):
-		self._ID = Id
-	@property
-	def id(self):
-		return self._ID
-	#当前脸图片数量
-	def faceN(self):
-		try:
-			for i in range(0,22):
-				self.face.append(cv2.imread(self._colorfile+str(self._ID)+'/%s.png' % str(i),cv2.IMREAD_COLOR))
-				self._faceN = i
-		except:
-			pass
-	#保存脸部图片
-	def face(self,color,gray):
-		
-		if self._faceN <=20:
-			try:
-				os.mkdir(self._grayfile + str(self._ID))
-				os.mkdir(self._colorfile + str(self._ID))
-			except Exception as e:
-				pass
-			path_gray = self._grayfile + str(self._ID) +'/'+ str(self._faceN) + '.png'
-			path_color = self._colorfile + str(self._ID) +'/'+ str(self._faceN) + '.png'
-			cv2.imwrite(path_gray,gray)
-			cv2.imwrite(path_color,color)
 
 class exciting(object):
 
 	def __init__(self,camera,#摄像头对象
+					pygameDraw,
 					name='Interesing',
 					width =800,
 					height=1000,
+					show = False,
 					history=20,#背景建模样本量
 					args=500):#忽略大小
-					
+
 		self.args = args
 		self.name = name
 		self.width = width
@@ -92,12 +58,12 @@ class exciting(object):
 		self.camera = camera
 		self.history = history
 
-		self.time = None
 		self.gray = None
 		self.model = None
 		self._frame = None
 		self._color = None
 		self._params = None
+		self._arduino = None
 		self._startTime = None
 		self._backgrouds = None
 		self._fpsEstimate = None
@@ -105,42 +71,35 @@ class exciting(object):
 		self._videoFilename = None
 		self._videoEncoding = None
 		self._facearray=None
-		
-		self._frames = 0 #帧计数器
+		self._isc2show = False
+
+		self._faceN = 0
+		self._frames = 0
+		self._bgframes = 0 #帧计数器
 		self._firstFace = 0
+		self._faceTooMuch = 10000
 		self._framesElapsed = 0
-
-		self._faceShow=[]
-		self._face_IDs=[]
-		self._data = {}
-
-		self.detector = dlib.get_frontal_face_detector()
 		
-		self.hog = cv2.HOGDescriptor()#初始化方向梯度直方图描述子/设置支持向量机
-		self.hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+		self._val= 4 #初始的摄像头角度
+		self._rinit = 4 #脸部丢失时的回归角度
+		self._space = 5 #多少次脸部检查后的摄像头调整
+		self._timeSpace = 0 #识别到脸部次数
+
+		self._data=[]
+		self._faceShow=[]
+		self._frameImg=[]
+		self.detector = dlib.get_frontal_face_detector()
+		self.predictor=dlib.shape_predictor("haarcascades//shape_predictor_68_face_landmarks.dat") 
+		#self.hog = cv2.HOGDescriptor()#初始化方向梯度直方图描述子/设置支持向量机
+		#self.hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
 		self.bg = cv2.createBackgroundSubtractorKNN(detectShadows=True)#初始化背景分割器
 		self.bg.setHistory(self.history)
-		
-		self.face_alt2 = cv2.CascadeClassifier('haarcascades//haarcascade_frontalface_alt2.xml')
-		self.path = ['Background','face','face/face_gray','face/face_color']
+		self.face_alt2 = cv2.CascadeClassifier('haarcascades//face.xml')
+		self.path = ['Background','face','face/face_color','face/face_gray','faceImg']
 
+		self.pd = pygameDraw
 		self.imgflie
-		self.facesID
-		self.pd = pygameDraw(self.name,self.height,self.width)
-	@property
-	def facesID(self):
-		try:
-			with open('face.json', 'r',encoding='UTF-8') as f:
-				self._data=json.load(f)
-				for i in range(0,len(self._data.keys())+1):
-					self._face_IDs.append(Id(i))
-		except:
-			pass
-		
-	def setface(self,face):
-		with open('face.json','w', encoding='utf8') as f:
-			json.dump(self._data,f,ensure_ascii=False)
-	
+
 	def inside(self,r1,r2):
 		x1,y1,w1,h1 = r1
 		x2,y2,w2,h2 = r2
@@ -162,22 +121,29 @@ class exciting(object):
 			y = vcenter - (w/2)
 		return (x-padding,y-padding,w+padding,h+padding)
 
-	def Collision(self,x):
-		if (x-90) <= 0:
-			return True
-		elif (x+90)>=self.width:
-			return False
-		
-	@property
-	def imgflie(self):
-		for path in self.path:
-			if os.path.exists(path):
-				print("OK")
-			else:
-				os.mkdir(path)
 	@property #在写视频吗？
 	def isWritingVideo(self):
 		return self._videoFilename is not None
+	@property
+	def Img(self):
+		self.loadJson
+		path_1 = self.path[4]+'/'+self.path[5]
+		for parent,dirnames,filenames in os.walk(path_1):#三个参数：分别返回1.父目录 2.所有文件夹名字（不含路径） 3.所有文件名字
+			for filename in filenames: #输出文件信息
+				path = os.path.join(parent,filename)
+				Img1 = pygame.image.load(path).convert_alpha()
+				self._frameImg.append(Img1)
+
+	@property
+	def loadJson(self):
+		try:
+			with open('face.json', 'r',encoding='UTF-8') as f:
+				self._data=json.load(f)
+				img = self._data["data"]
+				self._data=self._data[img]
+				self.path.append(self._data[0])
+		except:
+			pass
 	@property
 	def FPS(self):
 		#更新FPS估计和相关变量。
@@ -187,11 +153,30 @@ class exciting(object):
 			timeElapsed = time.time() - self._startTime
 			self._fpsEstimate = self._framesElapsed/timeElapsed
 		self._framesElapsed += 1
+		self._frames += 1
+	#保存脸部图片
+	def facePng(self,color,gray):
+		try:
+			self._faceN += 1
+			path_gray = self.path[3]  +'/'+ str(self._faceN) + '.png'
+			path_color = self.path[2] +'/'+ str(self._faceN) + '.png'
+			cv2.imwrite(path_gray,gray)
+			cv2.imwrite(path_color,color)
+		except:
+			print("保存脸失败！")
+	#文件夹是否存在，不在创建
 	@property
-	def backgrouds():
+	def imgflie(self):
+		for path in self.path:
+			if os.path.exists(path):
+				print("OK")
+			else:
+				os.mkdir(path)
+	@property
+	def backgrouds():#随机读取一张背景图片，如果读取到了就不用背景建模
 		self._backgrouds = self.readBackgroud(random.randint(0,19))
 		if self._backgrouds != None:
-			self._frames = 20
+			self._bgframes = 20
 	def readBackgroud(self,count):
 		return cv2.imread('Background//%s.png' % str(count),cv2.IMREAD_COLOR)
 
@@ -200,34 +185,7 @@ class exciting(object):
 
 	def writeImg(self,frame,path,count):
 		return cv2.imwrite(path+'/%s.png' % str(count),frame)
-
-	def read_images_array(self,path='face/face_gray/',l=20,z=0):
-	#读取图片（路径，张数，人数，图片太大了）
-	#face/str(1)/str(i)+'png'
-		c=0
-		x,y=[],[]
-		for o in range(0,z+1):
-			for i in range(0,l+1):
-				try:
-					path_in = path +str(o+1) +'/'+ str(i) + '.png'
-					im = cv2.imread(path_in,cv2.IMREAD_GRAYSCALE)
-					im = imutils.resize(im,32,32)
-				#im = cv2.resize(im,(100,100),interpolation = cv2.INTER_LINEAR)
-				
-					x.append(np.asarray(im,dtype=np.uint8))
-					y.append(c)
-					path_in = None
-				except:
-					continue
-			c=c+1
-		self._facearray = [x,y]
-	@property
-	def face_rec(self):
-		if self._facearray:
-			[x,y] = self._facearray
-			y=np.asarray(y,dtype=np.int32)
-			self.model = cv2.face.createEigenFaceRecognizer()
-			self.model.train(np.asarray(x),np.asarray(y))
+	#内部类把帧写入视频文件
 	def _writeVideoFrame(self):
 		if not self.isWritingVideo:
 			return
@@ -246,29 +204,39 @@ class exciting(object):
 		self._videoFilename = path
 		self._videoEncoding = encoding
 		self._writeVideoFrame()
-
-	def confirm(self,face,faces):#face 区域，faces 身份
+	#识别身份用（暂时没用）	
+	def confirm(self,face,faces):#face 区域，faces 
 		for i in range(0,len(faces)):
 			for j in range(0,len(faces[i])):
-				Collision=self.Collision(x)
-				self.pd.drawConfirm(face)
-				self.pd.show_text(self.pd._screen,(fx+fw,fy+(45*j)),faces[i][j],2, True,30)
+				self.pd.drawFace(face,True)
+				self.pd.drawConfirm(self,x,y,w,c=False)
 	#基础脸部识别		
-	def face(self,gray):
-		return self.face_alt2.detectMultiScale(gray, 1.3, 5)#脸
-	#身份识别
-	def face2(self,roi):
-		try:
-			return self.model.predict(roi)
-		except:
-			return
-	#dlib 脸识别器
-	def dlibFace(self,frame):
-		l = None
-		dets = self.detector(frame, 0)
+	def face(self):
+		return self.face_alt2.detectMultiScale(self.gray, 1.3, 5)#脸
+	#dlib 脸识别器 画图片到脸上绘制
+	def Img_to_Face(self,show = False):
+		if self._frames > int(self._data[1]):
+			self._frames = 0
+		dets = self.detector(self._color, 0)
 		for i,d in enumerate(dets):
-			#pygame.draw.rect(screen,[163,0,22],[d.left(),d.top(),d.right(),d.bottom()],3)
-			return d.left(),d.top(),d.right(),d.bottom()
+			try:
+				shape = self.predictor(self.gray,d)
+				if show:
+					for i in range(68):
+						pt=shape.part(i)
+						fa=shape.part(30)
+						x = fa.x+int(self._data[2])-85
+						y = fa.y+int(self._data[3])-30
+						self.pd._screen.blit(self._frameImg[self._frames], (x,y))
+
+						#self.pd.show_text((pt.x,pt.y),str(i),15,True,10)
+						#self.pd.circle(pt.x,pt.y)	
+			except:
+				pass
+
+	#返回diib识别对象
+	def dlibdate(self):
+		return self.detector(self._frame, 0)
 	#两帧不同
 	def frame_difference(self,firstFrame,gray):
 		avg = cv2.cvtColor(firstFrame,cv2.COLOR_BGR2GRAY)
@@ -281,7 +249,7 @@ class exciting(object):
 		thresh =cv2.dilate(thresh, None, iterations=2)
 		(_,cnts, _) =cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
 		return cnts
-	#KNN
+	#KNN（运动跟踪）
 	def KNN_difference(self,frame,min_area=500):
 		fgmask = self.bg.apply(frame)
 		thresh = cv2.threshold(fgmask, 25, 255, cv2.THRESH_BINARY)[1]
@@ -301,8 +269,8 @@ class exciting(object):
 					break		
 			if not is_inside:
 				rectangles.append(r)
-		return rectangles
-	#人识别
+		self._KNN = rectangles
+	#人识别（有点慢）
 	def people(self,frame):
 		#调整到（1）减少检测时间，将图像裁剪到最大宽度为400个像素
 		frame = imutils.resize(frame, width=min(400, frame.shape[1]))
@@ -319,14 +287,16 @@ class exciting(object):
 		try:
 			back = self.readBackgroud(5)
 		except:
-			if self._frames < self.history:
-				
-				self.pd.show_text((100,200),u"请离开镜头",1,True,120)
-				self.pd.show_text((110,320),u"背      景      建      模      中:  {}%".format((self._frames/self.history)*100),1,True,40)
+			if self._bgframes < self.history:
+				if self._isc2show:
+					pass
+				else:
+					self.pd.show_text((100,200),u"请离开镜头",1,True,120)
+					self.pd.show_text((110,320),u"背      景      建      模      中:  {}%".format((self._bgframes/self.history)*100),1,True,40)
 
 				KNN=self.KNN_difference(self._frame,self.args)
 				rect = self.people(self._frame) #人检查
-				l,t,w,h= self.dlibFace(self._color)
+				l,t,w,h= self.dlibFace()
 				face = self.face(self.gray) #脸
 			
 				if rect != [] or face != () or l != None or KNN != []:
@@ -334,94 +304,169 @@ class exciting(object):
 					self.pd.drawPeople(rect)
 					self.pd.drawFace(face)
 				else:
-					self.writeBackgroud(self._frames)
-					self._frames += 1
+					self.writeBackgroud(self._bgframes)
+					self._bgframes += 1
+	#dlib识别脸部绘制	
+	def discern(self):
+		KNN=self.KNN_difference(self._frame,self.args)
+		if  KNN != []:
+			try:
+				dets = self.dlibdate()
+				for i,d in enumerate(dets):
+					(x1,y1,x2,y2) = d.top(),d.bottom(),d.left(),d.right()
+					face = self._color[x1:y1,x2:y2]
+					face = imutils.resize(face,200,200) #设置大小
+					self._faceShow.append(face)
+					self.pd.drawFaces(self._faceShow)
+					self.pd.drawFace(x1,y1,x2,y2)#显示区域
+					self.pd.show_text((x2,x1-40),'index:%s' % str(i),14,True,30)
+					if len(self._faceShow) > 10:
+						self._faceShow.clear()
+			except:
+				pass
 
+	#face识别器
+	def discernFace(self,save = False):
+		KNN=self.KNN_difference(self._frame,self.args)
+		if  KNN != []:
+			faces=self.face() #脸
+			if faces != ():
+				for x,y,w,h in faces:
+					face = self._color[y:y+h,x:x+w]
+					face = imutils.resize(face,200,200) #设置大小
+					if save and self._faceN<self._faceTooMuch:
+						color = self._frame[y:y+h,x:x+w]
+						gray = self.gray[y:y+h,x:x+w]
+						gray = imutils.resize(gray,200,200)
+						color = imutils.resize(color,200,200)
+						self.facePng(color,gray)
+					self._faceShow.append(face)
+					self.pd.drawFaces(self._faceShow)
+					self.pd.drawFace2(x,y,w,h)#显示区域
+					if len(self._faceShow) > 10:
+						self._faceShow.clear() #超过10张 释放内存
+
+	#无窗口 帧获取
+	def NoWinStart(self):
+		(ret,cv_img)= self.camera.read() #获得帧
+		self._frame = imutils.resize(cv_img,self.width,self.height) #设置大小
+		self.gray = cv2.cvtColor(self._frame, cv2.COLOR_BGR2GRAY)#灰色
+	#窗口 帧获取
 	@property
 	def start(self):
-		self.pd.quit(self.camera)
-		self.FPS
-		(ret,cv_img)= self.camera.read()
-		self._frame = imutils.resize(cv_img,self.width,self.height)
+		self.FPS		  #帧数率
+		(ret,cv_img)= self.camera.read() #获得帧
+		self._frame = imutils.resize(cv_img,self.width,self.height) #设置大小
 		self.gray = cv2.cvtColor(self._frame, cv2.COLOR_BGR2GRAY)#灰色
 		self._color = cv2.cvtColor(self._frame, cv2.COLOR_RGB2BGR)#opencv的色彩空间是BGR，pygame的色彩空间是RGB
 		try:
+			self.pd.show_text((10,10),'FPS:%.2f' % self._fpsEstimate,14,True,30)
 			self.pd.show_text((10,self._frame.shape[0]-40),datetime.datetime.now().strftime(u"%Y-%d %I:%M:%S"),15,True,30)
 			pygame.display.update()
 			pixl_arr = np.swapaxes(self._color, 0, 1)
 			new_surf = pygame.pixelcopy.make_surface(pixl_arr)
 			self.pd._screen.blit(new_surf, (0, 0))
+			self.pd.quit(self.camera) #pygame 事件
 		except:
 			pass
-		self.discern()
-		if self._faceShow != []:
-			self.pd.drawFaces(self._faceShow)
-		self.bgbuild#背景建模
+	#提供端口
+	def ArduinoToPort(self,port):
+		try:
+			self._arduino = serial.Serial('com'+str(port),9600)
+		except:
+			print('端口没链接到Arduino')
+			pass
+	#Arduino 初始化
+	def ArduinoInit(self,rinit = 4,space = 5):
 
-	def discern(self):
-		KNN=self.KNN_difference(self._frame,self.args)
-		if  KNN != []:
-			face=self.face(self.gray) #脸
-			if face != ():
-				try:
-					self.pd.drawFace(face)#显示区域
-				except:
-					pass
-				x,y = [],[]
-				for fx,fy,fw,fh in face:
-					roi = self.gray[fy:fy+fh,fx:fx+fw]
-					roj = self._color[fy:fy+fh,fx:fx+fw]
-					roi = cv2.resize(roi,(200,200))
-					roj = cv2.resize(roj,(200,200))
-					self._faceShow.append(roj)
-
-					if self._facearray != None:
-						self.face_rec
-						self._params = self.face2(roi)
-
-				if self._params != None:
-					self.pd.drawFace(face,True)
-					print(self._params[0],self._params[1])
-					print("0: %s, Confidence: %.2f" % (self._params[0],self._params[1]))
-					#n = self._face_IDs[self._params[0]].faceN()
-					#self._face_IDs.append(Id(len(self._face_IDs)))
-
-	def toArduino(self):
-		l = 0
-		t = 0
-		KNN=self.KNN_difference(self._frame,self.args)
-		if  KNN != []:
-			face=self.face(self.gray) #脸
-
+		self._val= 4 #初始的摄像头角度
+		self._rinit = rinit #脸部丢失时的回归角度
+		self._space = space #多少次脸部检查后的摄像头调整
+		self._timeSpace = 0 #识别到脸部次数
+		#扫描20个端口
+		for i in range(0,20):
+			t = 0
 			try:
-				l,t,w,h = self.dlibFace(self._color)
-			except:
-				pass
-			if face != ():
-				self.pd.drawFace(face)#显示区域
-			return l,t
-''' 
-#人脸标记 #匹配值
-self._facearray=self.read_images_array()
-
-roi = cv2.resize(roi,(32,32),interpolation = cv2.INTER_LINEAR)
-					params[0],params[1]
-					self._data
-					x.append(np.asarray(roi,dtype=np.uint8))
-					y.append(faceslen)
-					et.face_rec([x,y])
-					cv2.imwrite('face/face_gray/1/%s.png' % str(faceID),roi)
-					cv2.imwrite('face/face_color/1/%s.png' % str(faceID),roj)
-
-					faceslen = faceslen+1
+				self._arduino = serial.Serial('com'+str(i),9600)
+				print('链接到com'+str(i)+'端口')
+				print('联系对方：Hello!')
+				if t == 5:
+					self._arduino.write('0'.encode())
+					time.sleep(1)
+					data = self._arduino.read(1)
+					if data !='':
+						print(data)
+						if data == 'Y':
+							print('is me')
+						else:
+							break
+					t+=1
 				else:
-					et.face2(roj)
-					if f<20:
-					cv2.imwrite('face/face_gray/1/%s.png' % str(f),roi)
-					cv2.imwrite('face/face_color/1/%s.png' % str(f),roj)
-					f =f+1
-'''
+					continue
+			except:
+				print('com'+str(i)+'端口没链接到Arduino')
+	#转动基础
+	def toArduino(self,faceMode):
+		x,y = 0,0
+		face =()
+		dets = None
+		if self._timeSpace > 1000:
+			self._timeSpace = 0
+		else:
+			self._timeSpace += 1
+		try:
+			KNN=self.KNN_difference(self._frame,self.args)
+			if KNN != []:
+				if face != []:
+					self.pd.drawFace2(face)#显示区域
+					for ax,ay,w,h in face:
+						x,y = ax,ay
+						print(x,y)
+				elif dets != None:
+					for i,d in enumerate(dets):
+						x,y = d.left(),d.top()
+				else:
+					self._val = self._rinit
+					i = str(self._val)
+					self._arduino.write(i.encode())
+					time.sleep(0.25)
+
+				if faceMode == 'face':
+					face=self.face()
+				elif faceMode == 'dlib':
+					dets=self.dlibdate()
+
+				
+			if self._val >= 9:
+				self._val = 9
+			elif self._val <=0:
+				self._val = 0
+
+			if x != 0:
+				if x < 280 and (self._timeSpace%self._space) == 0:
+					self._val += 1
+					i = str(self._val)
+					self._arduino.write(i.encode())
+					time.sleep(0.25)
+				elif x > 470 and (self._timeSpace%self._space) == 0:
+					self._val -= 1
+					i = str(self._val)
+					self._arduino.write(i.encode())
+					time.sleep(0.25)
+		except:
+			pass
+	#带窗口
+	def toWinArduino(self,faceMode='face'):#face or dlib
+		self.start
+		self.toArduino(faceMode)
+	#不带窗口
+	def NoWinToArduino(self,faceMode='face'):#face or dlib
+		self.NoWinStart()
+		self.toArduino(faceMode)
+
 	
+
+
 
 def car(self):
 	#汽车

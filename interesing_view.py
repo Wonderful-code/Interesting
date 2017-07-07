@@ -31,11 +31,12 @@ import argparse
 import numpy as np
 from sys import exit
 from interesing_model import exciting
+from pygame_model import pygameDraw
 # 创建参数解析器并解析参数
 ap = argparse.ArgumentParser()
 ap.add_argument("-i", "--image", help="path to the image file")
 ap.add_argument("-v", "--video", help="path to the video file")
-ap.add_argument("-n", "--name", type = str, default="Capture",help="window name")
+ap.add_argument("-n", "--name", type = str, default="Interesing",help="window name")
 ap.add_argument("-w", "--width", type = int,default=800,help="window width")
 ap.add_argument("-ht", "--height", type = int,default=1000,help="window height")
 ap.add_argument("-a", "--min-area", type=int, default=500, help="minimum area size")
@@ -53,17 +54,13 @@ else:
 width = args["width"]
 height = args["height"]
 
-
-et=exciting(camera,width=width,height=height)
+pd = pygameDraw(args["name"],height,width,True)
+et=exciting(camera,pd)
+#et.Img #加载图片
 
 while camera.isOpened():
-	
-	for event in pygame.event.get():
-		if event.type == pygame.MOUSEBUTTONDOWN:
-			pass
-		if event.type == pygame.QUIT:
-			camera.release()
-			pygame.quit()
-			exit()
 	et.start
+	et.discern()
+	#et.dlibFace(True)
+	#et.Img_to_Face(True)
 		

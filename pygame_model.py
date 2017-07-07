@@ -44,15 +44,18 @@ from pygame.font import *
 from pygame.locals import *
 
 class pygameDraw(object):
-	def __init__(self,name,height,width):
+	def __init__(self,name,height,width,show = False):
 
-		self._1 = 0
+		self.mouse_x = 0
+		self.mouse_y = 0
+
 		self._name = name
 		self._height = height
 		self._width = width
-		self.mouse_x = 0
-		self.mouse_y = 0
+		if show:
+			self._width = width+200
 		self._screen = None
+		self._framerate = pygame.time.Clock()
 				         #0          1
 		self._color = [[0,0,0],[255,255,255],
 						#新的脸2     3            4           5           6
@@ -69,7 +72,7 @@ class pygameDraw(object):
 	def init(self):
 		pygame.init()
 		pygame.display.set_caption(self._name)
-		self._screen = pygame.display.set_mode((self._width+200,self._height-399),pygame.RESIZABLE,32)
+		self._screen = pygame.display.set_mode((self._width,self._height-399),pygame.RESIZABLE,32)
 		self._screen.fill(self._color[0])#用黑色填充窗口
 
 	def show_text(self, pos, text, color, font_bold = False, font_size = 13, font_italic = False):
@@ -82,7 +85,7 @@ class pygameDraw(object):
 		cur_font.set_italic(font_italic)#设置是否斜体属性
 		text_fmt = cur_font.render(text, 1, self._color[color])#设置文字内容 
 		return self._screen.blit(text_fmt, pos)#绘制文字 
-
+		
 	def drawPeople(self,rect):
 		for x,y,w,h in rect:
 			pygame.draw.rect(self._screen,self._color[18],[x,y,w-x,h-y],3)
@@ -90,43 +93,30 @@ class pygameDraw(object):
 		for r in KNN:
 			x,y,w,h = self.wrap_digit(r)
 			pygame.draw.rect(self._screen,self._color[17],[x,y,w,h],3)
-	def drawFace(self,face,c=False):
+	def drawFace(self,x1,y1,x2,y2,c=False):
 		if c:
 			color = 3 #新脸
 		else:
 			color = 4 #已识别
-		for fx,fy,fw,fh in face:
-			pygame.draw.rect(self._screen,self._color[color],[fx,fy,fw,fh],3)
-	def drawConfirm(self,x,y,w,c=False):
-		if c:
-			color = 3 #新脸
-		else:
-			color = 4 #已识别
-		pygame.draw.rect(self._screen,self._color[color],[x+w,y+(42*j),90,40])
-	
-	def drawFaces(self,faceShow=[]):
-		if len(faceShow)<3:
-			n = len(faceShow)
-		else:
-			n = 3
-		for f in range(0,n):
-			roj = np.swapaxes(faceShow[f],0, 1)
-			roj = pygame.pixelcopy.make_surface(roj)
-			self._screen.blit(roj,(self._width,f*200))
-		'''
-		for i in range(0,len(faceShow)+1):
-			roj = np.swapaxes(faceShow[i],0, 1)
-			roj = pygame.pixelcopy.make_surface(roj)
-			#self.show_text(self._screen,(self._width-100,10),str(f),7,30)
-			#self.show_text((self._width,i*200),str(i),6,40)
-			self._screen.blit(roj,(self._width,i*200))
-'''
+		pygame.draw.rect(self._screen,self._color[color],[x2,x1,200,200],3)
+
+	def drawFace2(self,x,y,w,h):
+		pygame.draw.rect(self._screen,self._color[3],[x,y,w,h],3)
+
+	def circle(self,x,y):
+		pygame.draw.circle(self._screen,self._color[14],[x,y],2,2)
+	def drawConfirm(self,x,y,w,j):
+		if self.Collision(x):
+			pygame.draw.rect(self._screen,self._color[color],[x+w,y+(42*j),90,40])
+
+	def toDraw(self):
+		self._framerate.tick(30)
+		ticks = pygame.time.get_ticks()
+
 	def Collision(self,x): #边界判断
-		if (x-90) <= 0:
-			return 0
-		elif (x+90)>=self.width:
-			return 1
-			
+		if (x+90)>=self._width:
+			return True
+
 	def inside(self,r1,r2):
 		x1,y1,w1,h1 = r1
 		x2,y2,w2,h2 = r2
@@ -148,6 +138,19 @@ class pygameDraw(object):
 			y = vcenter - (w/2)
 		return (x-padding,y-padding,w+padding,h+padding)
 
+	def drawFaces(self,faceShow=[]):
+		n = 3
+		if len(faceShow)<3:
+			n = len(faceShow)
+		else:
+			faceShow.reverse()
+		for f in range(0,n):
+			roj = np.swapaxes(faceShow[f],0, 1)
+			roj = pygame.pixelcopy.make_surface(roj)
+			self._screen.blit(roj,(self._width-200,f*200))
+
+		
+
 	def quit(self,camera):
 		for event in pygame.event.get():
 			if event.type == pygame.MOUSEBUTTONDOWN:
@@ -161,6 +164,8 @@ class pygameDraw(object):
 				pos = pygame.mouse.get_pos()
 				self.mouse_x = pos[0]
 				self.mouse_y = pos[1]
+
+				
 '''
 		视频: pygame.movie
 要在游戏中播放片头动画、过场动画等视频画面，可以使用模块。
